@@ -19,16 +19,6 @@ cp /path/to/private/key "ssh/${KEY_FILE}"
 chmod 600 "ssh/${KEY_FILE}"
 ```
 
-Если имя ключа отличается или нужно явно задать пользователя и порт, добавьте `ssh/config`:
-
-```sshconfig
-Host example.com
-  User git
-  Port 7999
-  IdentityFile /home/goproxy/.ssh/<key-file-name>
-  IdentitiesOnly yes
-```
-
 2. Создайте `config.yml` из примера и отредактируйте его под свой Git-сервер:
 
 ```bash
@@ -39,6 +29,7 @@ cp config.example.yml config.yml
 prefixes:
   - module_prefix: "example.com/project"
     ssh_prefix: "ssh://git@example.com:7999/project"
+    key_file: "<key-file-name>"
 ```
 
 3. Запустите сервис:
@@ -73,8 +64,11 @@ CONFIG_FILE: "/config/config.yml"
 
 Файл `config.yml` монтируется в контейнер read-only.
 
-Каталог `ssh` монтируется в контейнер как `/home/goproxy/.ssh:ro`. Кладите в него только ключи и SSH-настройки,
-которые нужны этому proxy.
+Каталог `ssh` монтируется в контейнер как `/home/goproxy/.ssh:ro`. Кладите в него только ключи, которые нужны этому
+proxy.
+
+`key_file` задается относительно каталога `ssh`. Для `key_file: "project-key"` файл должен лежать в `ssh/project-key`.
+Если используется `key_file`, оставьте `GIT_SSH_COMMAND` стандартным.
 
 Для нескольких префиксов модулей добавьте несколько пар:
 
@@ -82,37 +76,14 @@ CONFIG_FILE: "/config/config.yml"
 prefixes:
   - module_prefix: "example.com/project"
     ssh_prefix: "ssh://git@example.com:7999/project"
+    key_file: "project-key"
   - module_prefix: "modules.example.net/team"
     ssh_prefix: "ssh://git@modules.example.net:7999/team"
+    key_file: "team-key"
 ```
 
-Каждая пара задает отдельное правило маппинга `module_prefix` → `ssh_prefix`.
-
-Для разных SSH-ключей используйте отдельные `Host` alias-ы в `ssh/config` и указывайте эти alias-ы в `ssh_prefix`:
-
-```sshconfig
-Host project-a-git
-  HostName example.com
-  User git
-  Port 7999
-  IdentityFile /home/goproxy/.ssh/<project-a-key>
-  IdentitiesOnly yes
-
-Host project-b-git
-  HostName example.com
-  User git
-  Port 7999
-  IdentityFile /home/goproxy/.ssh/<project-b-key>
-  IdentitiesOnly yes
-```
-
-```yaml
-prefixes:
-  - module_prefix: "example.com/project-a"
-    ssh_prefix: "ssh://git@project-a-git:7999/project-a"
-  - module_prefix: "example.com/project-b"
-    ssh_prefix: "ssh://git@project-b-git:7999/project-b"
-```
+Каждая пара задает отдельное правило маппинга `module_prefix` → `ssh_prefix`. Если у нескольких префиксов один Git
+host, для каждого префикса можно указать свой `key_file`.
 
 Если DNS внутри контейнера не видит Git host, добавьте для него IP:
 
@@ -123,20 +94,8 @@ hosts:
     insecure: true
 ```
 
-Если используются SSH alias-ы, IP задается для alias-а:
-
-```yaml
-hosts:
-  - host: "project-a-git"
-    ip: "192.0.2.10"
-    insecure: true
-  - host: "project-b-git"
-    ip: "192.0.2.10"
-    insecure: true
-```
-
 `insecure: true` отключает проверку SSH host key только для этого host. Если параметр не указан или равен `false`,
-сервис использует обычный режим `accept-new`. Файл `/home/goproxy/.ssh/config` внутри контейнера продолжает учитываться.
+сервис использует обычный режим `accept-new`.
 
 ## Маппинг модулей
 
@@ -215,12 +174,10 @@ protocol.
 
 ## Проверка SSH
 
+Для элемента `prefixes` с `key_file` сервис создает alias `goproxy-prefix-N`, где `N` — позиция элемента в списке.
+
 ```bash
-docker compose run --rm --entrypoint ssh goproxy \
-  -o StrictHostKeyChecking=accept-new \
-  -o UserKnownHostsFile=/tmp/goproxy_known_hosts \
-  -o BatchMode=yes \
-  -T -p 7999 git@example.com
+docker compose exec goproxy ssh -F /cache/ssh_config -T goproxy-prefix-1
 ```
 
 ## Диагностика
@@ -240,17 +197,7 @@ go env GOPROXY GOPRIVATE GONOPROXY GONOSUMDB
 Подробная проверка SSH внутри контейнера:
 
 ```bash
-docker compose run --rm --entrypoint ssh goproxy \
-  -o StrictHostKeyChecking=accept-new \
-  -o UserKnownHostsFile=/tmp/goproxy_known_hosts \
-  -o BatchMode=yes \
-  -vvv -T -p 7999 git@example.com
-```
-
-Если используется секция `hosts`, проверяйте SSH через config, который сервис создает после запуска:
-
-```bash
-docker compose exec goproxy ssh -F /cache/ssh_config -vvv -T -p 7999 git@example.com
+docker compose exec goproxy ssh -F /cache/ssh_config -vvv -T goproxy-prefix-1
 ```
 
 Проверить кешированные mirror-репозитории:

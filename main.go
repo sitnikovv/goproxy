@@ -47,7 +47,7 @@ func main() {
 	if len(prefixMappings) == 0 {
 		modulePrefix := getenv("MODULE_PREFIX", "example.com/project")
 		sshPrefix := getenv("SSH_PREFIX", "ssh://git@example.com:7999/project")
-		prefixMappings = append(prefixMappings, [2]string{modulePrefix, sshPrefix})
+		prefixMappings = append(prefixMappings, prefixMapping{modulePrefix: modulePrefix, sshPrefix: sshPrefix})
 	}
 
 	mappings, err := loadMappings(mappingFile)
@@ -58,7 +58,7 @@ func main() {
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		log.Fatalf("create cache dir: %v", err)
 	}
-	gitSSHCommand, err = prepareGitSSHCommand(cacheDir, gitSSHCommand, config.hostConfigs)
+	prefixMappings, gitSSHCommand, err = prepareGitSSHCommand(cacheDir, gitSSHCommand, config.hostConfigs, prefixMappings)
 	if err != nil {
 		log.Fatalf("prepare ssh config: %v", err)
 	}
@@ -96,7 +96,7 @@ func main() {
 	log.Fatal(server.ListenAndServe())
 }
 
-func handleProxyRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, prefixMappings [][2]string, cacheDir, gitSSHCommand string, mappings map[string][2]string) error {
+func handleProxyRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, prefixMappings []prefixMapping, cacheDir, gitSSHCommand string, mappings map[string][2]string) error {
 	escapedModule, action, escapedVersion, ok := splitProxyPath(r.URL.Path)
 	if !ok {
 		return errNotFound
@@ -186,7 +186,7 @@ func loadConfig(path string) (struct {
 	cacheDir       string
 	gitSSHCommand  string
 	mappingFile    string
-	prefixMappings [][2]string
+	prefixMappings []prefixMapping
 	hostConfigs    []hostConfig
 }, error) {
 	var result struct {
@@ -194,7 +194,7 @@ func loadConfig(path string) (struct {
 		cacheDir       string
 		gitSSHCommand  string
 		mappingFile    string
-		prefixMappings [][2]string
+		prefixMappings []prefixMapping
 		hostConfigs    []hostConfig
 	}
 
@@ -215,6 +215,7 @@ func loadConfig(path string) (struct {
 		Prefixes      []struct {
 			ModulePrefix string `yaml:"module_prefix"`
 			SSHPrefix    string `yaml:"ssh_prefix"`
+			KeyFile      string `yaml:"key_file"`
 		} `yaml:"prefixes"`
 		Hosts []struct {
 			Host     string `yaml:"host"`
@@ -230,7 +231,7 @@ func loadConfig(path string) (struct {
 	result.cacheDir = strings.TrimSpace(config.CacheDir)
 	result.gitSSHCommand = strings.TrimSpace(config.GitSSHCommand)
 	result.mappingFile = strings.TrimSpace(config.MappingFile)
-	result.prefixMappings = make([][2]string, 0, len(config.Prefixes))
+	result.prefixMappings = make([]prefixMapping, 0, len(config.Prefixes))
 	for index, item := range config.Prefixes {
 		modulePrefix := strings.TrimSuffix(strings.TrimSpace(item.ModulePrefix), "/")
 		if modulePrefix == "" {
@@ -240,7 +241,17 @@ func loadConfig(path string) (struct {
 		if sshPrefix == "" {
 			return result, fmt.Errorf("prefix %d: empty ssh_prefix", index+1)
 		}
-		result.prefixMappings = append(result.prefixMappings, [2]string{modulePrefix, sshPrefix})
+		keyFile := strings.TrimSpace(item.KeyFile)
+		if keyFile != "" {
+			if err := validateSSHKeyFile(keyFile); err != nil {
+				return result, fmt.Errorf("prefix %d: bad key_file: %w", index+1, err)
+			}
+		}
+		result.prefixMappings = append(result.prefixMappings, prefixMapping{
+			modulePrefix: modulePrefix,
+			sshPrefix:    sshPrefix,
+			keyFile:      keyFile,
+		})
 	}
 	result.hostConfigs = make([]hostConfig, 0, len(config.Hosts))
 	for index, item := range config.Hosts {
@@ -305,14 +316,14 @@ func loadMappings(path string) (map[string][2]string, error) {
 	return mappings, nil
 }
 
-func mapModule(modulePath string, prefixMappings [][2]string, mappings map[string][2]string) (string, string, bool) {
+func mapModule(modulePath string, prefixMappings []prefixMapping, mappings map[string][2]string) (string, string, bool) {
 	if mapped, ok := mappings[modulePath]; ok {
 		return mapped[0], mapped[1], true
 	}
 
 	for _, prefixMapping := range prefixMappings {
-		modulePrefix := strings.TrimSuffix(prefixMapping[0], "/")
-		sshPrefix := strings.TrimSuffix(prefixMapping[1], "/")
+		modulePrefix := strings.TrimSuffix(prefixMapping.modulePrefix, "/")
+		sshPrefix := strings.TrimSuffix(prefixMapping.sshPrefix, "/")
 		rest, ok := strings.CutPrefix(modulePath, modulePrefix+"/")
 		if !ok || rest == "" {
 			continue
