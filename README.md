@@ -113,6 +113,31 @@ prefixes:
   - module_prefix: "example.com/project-b"
     ssh_prefix: "ssh://git@project-b-git:7999/project-b"
 ```
+
+Если DNS внутри контейнера не видит Git host, добавьте для него IP:
+
+```yaml
+hosts:
+  - host: "example.com"
+    ip: "192.0.2.10"
+    insecure: true
+```
+
+Если используются SSH alias-ы, IP задается для alias-а:
+
+```yaml
+hosts:
+  - host: "project-a-git"
+    ip: "192.0.2.10"
+    insecure: true
+  - host: "project-b-git"
+    ip: "192.0.2.10"
+    insecure: true
+```
+
+`insecure: true` отключает проверку SSH host key только для этого host. Если параметр не указан или равен `false`,
+сервис использует обычный режим `accept-new`. Файл `/home/goproxy/.ssh/config` внутри контейнера продолжает учитываться.
+
 ## Маппинг модулей
 
 Базовое правило:
@@ -220,6 +245,12 @@ docker compose run --rm --entrypoint ssh goproxy \
   -o UserKnownHostsFile=/tmp/goproxy_known_hosts \
   -o BatchMode=yes \
   -vvv -T -p 7999 git@example.com
+```
+
+Если используется секция `hosts`, проверяйте SSH через config, который сервис создает после запуска:
+
+```bash
+docker compose exec goproxy ssh -F /cache/ssh_config -vvv -T -p 7999 git@example.com
 ```
 
 Проверить кешированные mirror-репозитории:

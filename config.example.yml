@@ -1,3 +1,9 @@
 prefixes:
   - module_prefix: "example.com/project"
     ssh_prefix: "ssh://git@example.com:7999/project"
+
+# Optional: use this when the container cannot resolve a Git host through DNS.
+# hosts:
+#   - host: "example.com"
+#     ip: "192.0.2.10"
+#     insecure: true

@@ -111,6 +111,31 @@ prefixes:
   - module_prefix: "example.com/project-b"
     ssh_prefix: "ssh://git@project-b-git:7999/project-b"
 ```
+
+If the container cannot resolve a Git host through DNS, add an IP for it:
+
+```yaml
+hosts:
+  - host: "example.com"
+    ip: "192.0.2.10"
+    insecure: true
+```
+
+If SSH aliases are used, set the IP for the alias:
+
+```yaml
+hosts:
+  - host: "project-a-git"
+    ip: "192.0.2.10"
+    insecure: true
+  - host: "project-b-git"
+    ip: "192.0.2.10"
+    insecure: true
+```
+
+`insecure: true` disables SSH host key checking only for that host. If the parameter is omitted or set to `false`, the
+service uses the regular `accept-new` mode. The `/home/goproxy/.ssh/config` file inside the container is still included.
+
 ## Module Mapping
 
 Default rule:
@@ -217,6 +242,12 @@ docker compose run --rm --entrypoint ssh goproxy \
   -o UserKnownHostsFile=/tmp/goproxy_known_hosts \
   -o BatchMode=yes \
   -vvv -T -p 7999 git@example.com
+```
+
+If the `hosts` section is used, check SSH through the config created by the running service:
+
+```bash
+docker compose exec goproxy ssh -F /cache/ssh_config -vvv -T -p 7999 git@example.com
 ```
 
 Inspect cached mirror repositories:

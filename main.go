@@ -31,6 +31,8 @@ var errNotFound = errors.New("not found")
 var errBadRequest = errors.New("bad request")
 var errUpstream = errors.New("upstream error")
 
+const defaultGitSSHCommand = "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/goproxy_known_hosts -o BatchMode=yes"
+
 func main() {
 	config, err := loadConfig(os.Getenv("CONFIG_FILE"))
 	if err != nil {
@@ -39,7 +41,7 @@ func main() {
 
 	listenAddr := configValue(config.listenAddr, getenv("LISTEN_ADDR", ":8081"))
 	cacheDir := configValue(config.cacheDir, getenv("CACHE_DIR", "/cache"))
-	gitSSHCommand := configValue(config.gitSSHCommand, getenv("GIT_SSH_COMMAND", "ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/goproxy_known_hosts -o BatchMode=yes"))
+	gitSSHCommand := configValue(config.gitSSHCommand, getenv("GIT_SSH_COMMAND", defaultGitSSHCommand))
 	mappingFile := configValue(config.mappingFile, os.Getenv("MAPPING_FILE"))
 	prefixMappings := config.prefixMappings
 	if len(prefixMappings) == 0 {
@@ -55,6 +57,10 @@ func main() {
 
 	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
 		log.Fatalf("create cache dir: %v", err)
+	}
+	gitSSHCommand, err = prepareGitSSHCommand(cacheDir, gitSSHCommand, config.hostConfigs)
+	if err != nil {
+		log.Fatalf("prepare ssh config: %v", err)
 	}
 
 	mux := http.NewServeMux()
@@ -181,6 +187,7 @@ func loadConfig(path string) (struct {
 	gitSSHCommand  string
 	mappingFile    string
 	prefixMappings [][2]string
+	hostConfigs    []hostConfig
 }, error) {
 	var result struct {
 		listenAddr     string
@@ -188,6 +195,7 @@ func loadConfig(path string) (struct {
 		gitSSHCommand  string
 		mappingFile    string
 		prefixMappings [][2]string
+		hostConfigs    []hostConfig
 	}
 
 	if strings.TrimSpace(path) == "" {
@@ -208,6 +216,11 @@ func loadConfig(path string) (struct {
 			ModulePrefix string `yaml:"module_prefix"`
 			SSHPrefix    string `yaml:"ssh_prefix"`
 		} `yaml:"prefixes"`
+		Hosts []struct {
+			Host     string `yaml:"host"`
+			IP       string `yaml:"ip"`
+			Insecure bool   `yaml:"insecure"`
+		} `yaml:"hosts"`
 	}
 	if err := yaml.Unmarshal(content, &config); err != nil {
 		return result, err
@@ -228,6 +241,18 @@ func loadConfig(path string) (struct {
 			return result, fmt.Errorf("prefix %d: empty ssh_prefix", index+1)
 		}
 		result.prefixMappings = append(result.prefixMappings, [2]string{modulePrefix, sshPrefix})
+	}
+	result.hostConfigs = make([]hostConfig, 0, len(config.Hosts))
+	for index, item := range config.Hosts {
+		host := hostConfig{
+			host:     strings.TrimSpace(item.Host),
+			ip:       strings.TrimSpace(item.IP),
+			insecure: item.Insecure,
+		}
+		if err := host.validate(index + 1); err != nil {
+			return result, err
+		}
+		result.hostConfigs = append(result.hostConfigs, host)
 	}
 
 	return result, nil
