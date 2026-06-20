@@ -1,0 +1,12 @@
+.git/
+.secrets
+.secrets/
+.secrets/*
+ssh
+ssh/
+ssh/*
+config.yml
+AGENTS.md
+AGENTS_GO.md
+RULES.md
+HANDOFF.md

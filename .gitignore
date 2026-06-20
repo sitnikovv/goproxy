@@ -1,0 +1,6 @@
+.secrets/
+ssh/
+config.yml
+*.md
+!README.md
+!README_en.md

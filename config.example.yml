@@ -1,0 +1,3 @@
+prefixes:
+  - module_prefix: "example.com/project"
+    ssh_prefix: "ssh://git@example.com:7999/project"
