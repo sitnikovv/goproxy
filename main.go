@@ -460,14 +460,14 @@ func serveLatest(ctx context.Context, w http.ResponseWriter, mirrorDir, modulePa
 
 	for i := len(versions) - 1; i >= 0; i-- {
 		version := versions[i]
-		commit, err := resolveVersion(ctx, mirrorDir, subdir, version)
+		commit, resolvedSubdir, err := resolveModuleVersion(ctx, mirrorDir, modulePath, subdir, version)
 		if err != nil {
 			if errors.Is(err, errNotFound) {
 				continue
 			}
 			return err
 		}
-		exists, err := treeExists(ctx, mirrorDir, commit, subdir)
+		exists, err := treeExists(ctx, mirrorDir, commit, resolvedSubdir)
 		if err != nil {
 			return err
 		}
@@ -481,9 +481,15 @@ func serveLatest(ctx context.Context, w http.ResponseWriter, mirrorDir, modulePa
 	if err != nil {
 		return errNotFound
 	}
-	exists, err := treeExists(ctx, mirrorDir, commit, subdir)
-	if err != nil {
-		return err
+	var exists bool
+	for _, candidate := range moduleRootCandidates(modulePath, subdir) {
+		exists, err = treeExists(ctx, mirrorDir, commit, candidate)
+		if err != nil {
+			return err
+		}
+		if exists {
+			break
+		}
 	}
 	if !exists {
 		return errNotFound
@@ -496,7 +502,7 @@ func serveLatest(ctx context.Context, w http.ResponseWriter, mirrorDir, modulePa
 }
 
 func serveVersion(ctx context.Context, w http.ResponseWriter, mirrorDir, modulePath, subdir, version, action string) error {
-	commit, err := resolveVersion(ctx, mirrorDir, subdir, version)
+	commit, subdir, err := resolveModuleVersion(ctx, mirrorDir, modulePath, subdir, version)
 	if err != nil {
 		return err
 	}
@@ -522,6 +528,35 @@ func serveVersion(ctx context.Context, w http.ResponseWriter, mirrorDir, moduleP
 }
 
 func listVersions(ctx context.Context, mirrorDir, modulePath, subdir string) ([]string, error) {
+	seen := map[string]bool{}
+	for _, candidate := range moduleRootCandidates(modulePath, subdir) {
+		versions, err := listVersionsForSubdir(ctx, mirrorDir, modulePath, candidate)
+		if err != nil {
+			return nil, err
+		}
+		for _, version := range versions {
+			seen[version] = true
+		}
+	}
+
+	versions := make([]string, 0, len(seen))
+	for version := range seen {
+		versions = append(versions, version)
+	}
+	semver.Sort(versions)
+
+	filtered := versions[:0]
+	for _, version := range versions {
+		if _, _, err := resolveModuleVersion(ctx, mirrorDir, modulePath, subdir, version); err == nil {
+			filtered = append(filtered, version)
+		} else if !errors.Is(err, errNotFound) {
+			return nil, err
+		}
+	}
+	return filtered, nil
+}
+
+func listVersionsForSubdir(ctx context.Context, mirrorDir, modulePath, subdir string) ([]string, error) {
 	output, err := gitOutput(ctx, mirrorDir, "", "for-each-ref", "--format=%(refname:strip=2)", "refs/tags")
 	if err != nil {
 		return nil, err
@@ -653,6 +688,43 @@ func resolveVersion(ctx context.Context, mirrorDir, subdir, version string) (str
 	}
 
 	return "", errNotFound
+}
+
+func resolveModuleVersion(ctx context.Context, mirrorDir, modulePath, subdir, version string) (string, string, error) {
+	for _, candidate := range moduleRootCandidates(modulePath, subdir) {
+		commit, err := resolveVersion(ctx, mirrorDir, candidate, version)
+		if err != nil {
+			if errors.Is(err, errNotFound) {
+				continue
+			}
+			return "", "", err
+		}
+		if candidate != "" {
+			exists, err := goModExists(ctx, mirrorDir, commit, candidate)
+			if err != nil {
+				return "", "", err
+			}
+			if !exists {
+				continue
+			}
+		}
+		return commit, candidate, nil
+	}
+	return "", "", errNotFound
+}
+
+func moduleRootCandidates(modulePath, subdir string) []string {
+	if subdir != "" {
+		return []string{subdir}
+	}
+
+	_, pathMajor, ok := module.SplitPathVersion(modulePath)
+	if !ok || pathMajor == "" {
+		return []string{subdir}
+	}
+
+	candidate := strings.TrimPrefix(pathMajor, "/")
+	return []string{candidate, subdir}
 }
 
 func tagCandidates(subdir, version string) []string {
