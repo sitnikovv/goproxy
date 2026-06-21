@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 	modzip "golang.org/x/mod/zip"
@@ -786,6 +787,10 @@ func writeMod(ctx context.Context, w http.ResponseWriter, mirrorDir, modulePath,
 		if err != nil {
 			return fmt.Errorf("%w: read go.mod: %v", errUpstream, err)
 		}
+		content, err = rewriteModContent(content, modulePath)
+		if err != nil {
+			return fmt.Errorf("%w: parse go.mod: %v", errUpstream, err)
+		}
 	default:
 		return fmt.Errorf("%w: %s is %s, not blob", errUpstream, modPath, entryType)
 	}
@@ -793,6 +798,17 @@ func writeMod(ctx context.Context, w http.ResponseWriter, mirrorDir, modulePath,
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, err = w.Write(content)
 	return err
+}
+
+func rewriteModContent(content []byte, modulePath string) ([]byte, error) {
+	file, err := modfile.Parse("go.mod", content, nil)
+	if err != nil {
+		return nil, err
+	}
+	if err := file.AddModuleStmt(modulePath); err != nil {
+		return nil, err
+	}
+	return file.Format()
 }
 
 func goModPath(subdir string) string {
@@ -810,6 +826,9 @@ func writeZip(ctx context.Context, w http.ResponseWriter, mirrorDir, modulePath,
 	defer os.RemoveAll(sourceDir)
 
 	if err := exportTree(ctx, mirrorDir, commit, subdir, sourceDir); err != nil {
+		return err
+	}
+	if err := rewriteExportedMod(sourceDir, modulePath); err != nil {
 		return err
 	}
 
@@ -836,6 +855,22 @@ func writeZip(ctx context.Context, w http.ResponseWriter, mirrorDir, modulePath,
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
 	_, err = io.Copy(w, zipFile)
 	return err
+}
+
+func rewriteExportedMod(sourceDir, modulePath string) error {
+	path := filepath.Join(sourceDir, "go.mod")
+	content, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	content, err = rewriteModContent(content, modulePath)
+	if err != nil {
+		return fmt.Errorf("%w: parse go.mod: %v", errUpstream, err)
+	}
+	return os.WriteFile(path, content, 0o644)
 }
 
 func exportTree(ctx context.Context, mirrorDir, commit, subdir, targetDir string) error {
