@@ -54,20 +54,10 @@ http://localhost:8081
 | `MAPPING_FILE` | empty |
 | `CONFIG_FILE` | empty |
 
-`docker-compose.yml` sets:
+Put `config.yml` next to `docker-compose.yml`. Put SSH keys in the `ssh` directory.
 
-```yaml
-CONFIG_FILE: "/config/config.yml"
-```
-
-`config.yml` is mounted read-only into the container. On startup, the container copies it into its internal
-`/config/config.yml`, fixes permissions, and passes that path to the service through `CONFIG_FILE`.
-
-The `ssh` directory is mounted read-only. On startup, the container copies keys into its internal
-`/home/goproxy/.ssh`, fixes permissions, and runs the service as the `goproxy` user.
-
-`key_file` is relative to the `ssh` directory. For `key_file: "project-key"`, the file must exist as `ssh/project-key`.
-If `key_file` is used, keep `GIT_SSH_COMMAND` at its default value.
+`key_file` sets the file name in the `ssh` directory. For `key_file: "project-key"`, the file must exist as
+`ssh/project-key`.
 
 For rootless Podman, use the same files. Replace `docker compose` with `podman compose` in commands if the Podman
 compose plugin is installed.
@@ -211,3 +201,46 @@ docker compose exec --user goproxy goproxy sh -lc 'git -C /cache/<hash>.git tag 
 
 For modules in subdirectories, the service accepts tags like `v1.1.1` and `<submodule>/v1.1.1`. If no semver tags are
 available, `@latest` returns a pseudo-version from `HEAD`.
+
+### Common Errors
+
+If `go` connects to the Git host directly:
+
+```text
+unrecognized import path "example.com/project/repo": reading https://example.com/project/repo?go-get=1
+```
+
+Check `GONOPROXY`. For private modules that must go through this proxy, the value must be `none`:
+
+```bash
+go env GOPROXY GOPRIVATE GONOPROXY GONOSUMDB
+go env -w GONOPROXY=none
+```
+
+If a public module is not found with `direct`:
+
+```text
+reading github.com/vendor/module/go.mod at revision v1.2.3: unknown revision v1.2.3
+```
+
+Add the public Go proxy to `GOPROXY`:
+
+```bash
+go env -w GOPROXY=http://localhost:8081,https://proxy.golang.org,direct
+```
+
+If `go.sum` contains an old checksum for a private module:
+
+```text
+checksum mismatch
+```
+
+Remove only the lines for the affected private module and version, then recalculate dependencies:
+
+```bash
+module_path="example.com/project/repo/v2"
+version="v2.0.0"
+sed -i "\#^${module_path//\//\\/} ${version}\\(/go\\.mod\\)\\? #d" go.sum
+go clean -modcache
+go mod tidy
+```
