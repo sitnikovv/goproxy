@@ -2,6 +2,8 @@ services:
   goproxy:
     build:
       context: .
+    image: goproxy:local
+    pull_policy: build
     ports:
       - "8081:8081"
     environment:
