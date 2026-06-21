@@ -33,7 +33,7 @@ prefixes:
 3. Start the service:
 
 ```bash
-HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build
+docker compose up --build
 ```
 
 After startup, the proxy is available on:
@@ -60,12 +60,17 @@ http://localhost:8081
 CONFIG_FILE: "/config/config.yml"
 ```
 
-`config.yml` is mounted read-only into the container.
+`config.yml` is mounted read-only into the container. On startup, the container copies it into its internal
+`/config/config.yml`, fixes permissions, and passes that path to the service through `CONFIG_FILE`.
 
-The `ssh` directory is mounted into the container as `/home/goproxy/.ssh:ro`. Put only this proxy's keys there.
+The `ssh` directory is mounted read-only. On startup, the container copies keys into its internal
+`/home/goproxy/.ssh`, fixes permissions, and runs the service as the `goproxy` user.
 
 `key_file` is relative to the `ssh` directory. For `key_file: "project-key"`, the file must exist as `ssh/project-key`.
 If `key_file` is used, keep `GIT_SSH_COMMAND` at its default value.
+
+For rootless Podman, use the same files. Replace `docker compose` with `podman compose` in commands if the Podman
+compose plugin is installed.
 
 For multiple module prefixes, add several pairs:
 
@@ -174,7 +179,7 @@ For a `prefixes` item with `key_file`, the service creates alias `goproxy-prefix
 position.
 
 ```bash
-docker compose exec goproxy ssh -F /cache/ssh_config -T goproxy-prefix-1
+docker compose exec --user goproxy goproxy ssh -F /cache/ssh_config -T goproxy-prefix-1
 ```
 
 ## Diagnostics
@@ -194,14 +199,14 @@ go env GOPROXY GOPRIVATE GONOPROXY GONOSUMDB
 Verbose SSH check inside the container:
 
 ```bash
-docker compose exec goproxy ssh -F /cache/ssh_config -vvv -T goproxy-prefix-1
+docker compose exec --user goproxy goproxy ssh -F /cache/ssh_config -vvv -T goproxy-prefix-1
 ```
 
 Inspect cached mirror repositories:
 
 ```bash
-docker compose exec goproxy sh -lc 'find /cache -maxdepth 1 -name "*.git" -print'
-docker compose exec goproxy sh -lc 'git -C /cache/<hash>.git tag -l'
+docker compose exec --user goproxy goproxy sh -lc 'find /cache -maxdepth 1 -name "*.git" -print'
+docker compose exec --user goproxy goproxy sh -lc 'git -C /cache/<hash>.git tag -l'
 ```
 
 For modules in subdirectories, the service accepts tags like `v1.1.1` and `<submodule>/v1.1.1`. If no semver tags are

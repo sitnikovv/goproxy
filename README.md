@@ -35,7 +35,7 @@ prefixes:
 3. Запустите сервис:
 
 ```bash
-HOST_UID=$(id -u) HOST_GID=$(id -g) docker compose up --build
+docker compose up --build
 ```
 
 После запуска proxy доступен на порту:
@@ -62,13 +62,17 @@ http://localhost:8081
 CONFIG_FILE: "/config/config.yml"
 ```
 
-Файл `config.yml` монтируется в контейнер read-only.
+Файл `config.yml` монтируется в контейнер read-only. При старте контейнер копирует его во внутренний
+`/config/config.yml`, выставляет права и передает этот путь сервису через `CONFIG_FILE`.
 
-Каталог `ssh` монтируется в контейнер как `/home/goproxy/.ssh:ro`. Кладите в него только ключи, которые нужны этому
-proxy.
+Каталог `ssh` монтируется в контейнер read-only. При старте контейнер копирует ключи во внутренний
+`/home/goproxy/.ssh`, выставляет права и запускает сервис от пользователя `goproxy`.
 
 `key_file` задается относительно каталога `ssh`. Для `key_file: "project-key"` файл должен лежать в `ssh/project-key`.
 Если используется `key_file`, оставьте `GIT_SSH_COMMAND` стандартным.
+
+Для rootless Podman используйте те же файлы. В командах замените `docker compose` на `podman compose`, если compose
+плагин Podman установлен.
 
 Для нескольких префиксов модулей добавьте несколько пар:
 
@@ -177,7 +181,7 @@ protocol.
 Для элемента `prefixes` с `key_file` сервис создает alias `goproxy-prefix-N`, где `N` — позиция элемента в списке.
 
 ```bash
-docker compose exec goproxy ssh -F /cache/ssh_config -T goproxy-prefix-1
+docker compose exec --user goproxy goproxy ssh -F /cache/ssh_config -T goproxy-prefix-1
 ```
 
 ## Диагностика
@@ -197,14 +201,14 @@ go env GOPROXY GOPRIVATE GONOPROXY GONOSUMDB
 Подробная проверка SSH внутри контейнера:
 
 ```bash
-docker compose exec goproxy ssh -F /cache/ssh_config -vvv -T goproxy-prefix-1
+docker compose exec --user goproxy goproxy ssh -F /cache/ssh_config -vvv -T goproxy-prefix-1
 ```
 
 Проверить кешированные mirror-репозитории:
 
 ```bash
-docker compose exec goproxy sh -lc 'find /cache -maxdepth 1 -name "*.git" -print'
-docker compose exec goproxy sh -lc 'git -C /cache/<hash>.git tag -l'
+docker compose exec --user goproxy goproxy sh -lc 'find /cache -maxdepth 1 -name "*.git" -print'
+docker compose exec --user goproxy goproxy sh -lc 'git -C /cache/<hash>.git tag -l'
 ```
 
 Если версия находится в подкаталоге, сервис принимает теги вида `v1.1.1` и `<submodule>/v1.1.1`. Если semver-тегов

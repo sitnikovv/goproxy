@@ -2,9 +2,6 @@ services:
   goproxy:
     build:
       context: .
-      args:
-        HOST_UID: "${HOST_UID:-1000}"
-        HOST_GID: "${HOST_GID:-1000}"
     ports:
       - "8081:8081"
     environment:
@@ -15,8 +12,8 @@ services:
       GIT_TERMINAL_PROMPT: "0"
     volumes:
       - goproxy-cache:/cache
-      - ./ssh:/home/goproxy/.ssh:ro
-      - ./config.yml:/config/config.yml:ro
+      - ./ssh:/ssh:ro,Z
+      - ./config.yml:/config-source/config.yml:ro,Z
 
 volumes:
   goproxy-cache:
